@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>LC RMB 季报生成工具</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pizzip@3.1.4/dist/pizzip.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pizzip@3.1.4/dist/pizzip-utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/docxtemplater@3.37.12/build/docxtemplater.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+
+        .overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 999
+        }
+
+        .dialog {
+            width: 640px;
+            background: #fff;
+            padding: 28px;
+            border-radius: 14px;
+            box-shadow: 0 8px 30px #0003
+        }
+
+        h3 {
+            margin-top: 0;
+            margin-bottom: 24px;
+            font-size: 22px;
+        }
+
+        .row {
+            margin-bottom: 18px
+        }
+
+        label.title-label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            font-size: 15px;
+        }
+
+        input[type="file"] {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            background: #fff;
+        }
+
+        .tip {
+            color: #4b5563;
+            font-size: 13px;
+            margin-top: 6px;
+            line-height: 1.5
+        }
+
+        .err {
+            color: #dc2626;
+            font-size: 13px;
+            margin-top: 10px;
+            white-space: pre-wrap;
+        }
+
+        .checkbox-group {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 10px;
+            max-height: 180px;
+            overflow-y: auto;
+            background: #fbfbfb;
+        }
+
+        .checkbox-item {
+            margin: 6px 0;
+        }
+
+        .checkbox-item label {
+            display: flex;
+            align-items: center;
+            margin: 0;
+            padding: 12px 14px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            background: #ffffff;
+            cursor: pointer;
+            transition: all 0.18s ease-in-out;
+            font-weight: normal;
+            font-size: 14px;
+        }
+
+        .checkbox-item label:hover {
+            border-color: #2563eb;
+            background: #f5f9ff;
+        }
+
+        .checkbox-item input[type="checkbox"] {
+            appearance: none;
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            border: 1.5px solid #9ca3af;
+            border-radius: 4px;
+            margin-right: 12px;
+            position: relative;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .checkbox-item input[type="checkbox"]:checked {
+            background: #2563eb;
+            border-color: #2563eb;
+        }
+
+        .checkbox-item input[type="checkbox"]:checked::after {
+            content: "";
+            position: absolute;
+            left: 5px;
+            top: 1px;
+            width: 5px;
+            height: 10px;
+            border: solid #fff;
+            border-width: 0 2px 2px 0;
+            transform: rotate(45deg);
+        }
+
+        .checkbox-item:has(input:checked) label {
+            border-color: #2563eb;
+            background: #eef4ff;
+        }
+
+        .btn-wrap {
+            margin-top: 12px;
+        }
+
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+
+        #btnUpdate {
+            background: #2563eb;
+            color: #fff;
+        }
+
+        #btnUpdate:disabled {
+            background: #94a3b8;
+            cursor: not-allowed;
+        }
+
+        #btnReset {
+            background: #6b7280;
+            color: #fff;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="overlay">
+        <div class="dialog">
+            <h3>LC RMB 季报生成工具</h3>
+            <div class="row">
+                <label class="title-label">1. 上传DataSource（Excel）</label>
+                <input type="file" id="fileSource" accept=".xlsx,.xls" />
+                <div class="tip">✅ 统一规则：第1行=变量名；跳过第2行，从第3行开始读取数据</div>
+            </div>
+            <div class="row">
+                <label class="title-label">选择Sheet Name（可以多选，需要同时勾选基金基础信息 + 投资映射表 + 投资组合表）</label>
+                <div id="sheetCheckGroup" class="checkbox-group">
+                    <div style="color:#999;padding:4px;">请先上传数据源</div>
+                </div>
+            </div>
+            <div class="row">
+                <label class="title-label">2. 上传Template（docx模板）</label>
+                <div class="tip">✅ 列表循环：{#listListed} / {#listFiled} / {#listOther} / {#listPortfolio}<br>✅
+                    合计行：{portfolioTotal.xxx}；基金基础信息直接 {fundInfo.xxx}
+                </div>
+                <input type="file" id="fileTpl" accept=".docx" />
+            </div>
+            <div class="btn-wrap">
+                <button id="btnUpdate" disabled>Update & 生成Word</button>
+                <button id="btnReset">重置清除</button>
+            </div>
+            <div id="errBox" class="err"></div>
+            <div class="tip">💡 标签和表格之间必须有空行隔开！循环标签不要被Word拆分换行</div>
+        </div>
+    </div>
+
+    <script>
+        const $ = s => document.querySelector(s);
+        const $$ = s => document.querySelectorAll(s);
+        const errBox = $("#errBox");
+        const sheetCheckGroup = $("#sheetCheckGroup");
+
+        let sourceWorkbook = null;
+        let tplBuffer = null;
+        let sheetList = [];
+        let fundInfo = {};
+
+        //2020年10月
+
+        function fmtYearMonth(val) {
+            if (val === null || val === undefined || val === "") return "";
+            if (typeof val === "number") {
+                const d = new Date(Math.round((val - 25569) * 86400 * 1000));
+                return d.getFullYear() + "年" + (d.getMonth() + 1) + "月";
+            }
+            const s = String(val).trim();
+            const m = s.match(/^(\d{4})[\/-](\d{1,2})/);
+            if (m) {
+                return m[1] + "年" + Number(m[2]) + "月";
+            }
+            const d = new Date(s);
+            if (!isNaN(d.getTime())) {
+                return d.getFullYear() + "年" + (d.getMonth() + 1) + "月";
+            }
+            return s;
+        }
+
+        // 百分比格式化 0.1234 → 12.34%
+        function fmtPercent(val) {
+            if (val === null || val === undefined || val === "") return "";
+            const num = Number(val);
+            if (!isNaN(num)) {
+                return (num * 100).toFixed(2) + "%";
+            }
+            return "";
+        }
+
+        // 金额格式化：保留2位小数，0返回 "-"，52.7自动补成52.70
+        function fmtMoney(val) {
+            if (val === null || val === undefined || val === "") return "";
+            const num = Number(val);
+            if (isNaN(num)) return "-";
+            if (num === 0) return "-";
+            return num.toFixed(2);
+        }
+
+        /**
+        * excel序列号转中文日期格式：yyyy年MM月dd日
+        * @param {number|string} serial 如 44088
+        * @returns {string} 2020年10月15日
+        */
+        function excelSerialToDate(serial) {
+            if (!serial || isNaN(Number(serial))) return serial;
+            // excel 1900日期系统偏移
+            const date = new Date((serial - 25569) * 86400 * 1000);
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            return `${y}年${m}月${d}日`;
+        }
+
+        //2020年9月14日
+        function fmtDateNoPad(serial) {
+                if (!serial || isNaN(Number(serial))) return serial;
+                const date = new Date((serial - 25569) * 86400 * 1000);
+                const y = date.getFullYear();
+                const m = date.getMonth() + 1;
+                const d = date.getDate();
+                return `${y}年${m}月${d}日`;
+            }
+
+
+        //2026/9/30
+        function fmtSlashDate(serial) {
+                if (!serial || isNaN(Number(serial))) return serial;
+                const date = new Date((serial - 25569) * 86400 * 1000);
+                const y = date.getFullYear();
+                const m = date.getMonth() + 1;
+                const d = date.getDate();
+                return `${y}/${m}/${d}`;
+            }
+
+
+
+        $("#fileSource").onchange = async e => {
+            errBox.textContent = "";
+            const f = e.target.files[0];
+            if (!f) return;
+            const buf = await f.arrayBuffer();
+            sourceWorkbook = XLSX.read(buf);
+            sheetList = sourceWorkbook.SheetNames;
+            sheetCheckGroup.innerHTML = "";
+            sheetList.forEach(n => {
+                const div = document.createElement("div");
+                div.className = "checkbox-item";
+                div.innerHTML = `<label><input type="checkbox" class="sheet-check" value="${n}"> ${n}</label>`;
+                sheetCheckGroup.appendChild(div);
+            })
+            $$(".sheet-check").forEach(cb => {
+                cb.onchange = () => {
+                    errBox.textContent = "";
+                    checkReady();
+                }
+            })
+            checkReady();
+        }
+
+        $("#fileTpl").onchange = async e => {
+            errBox.textContent = "";
+            const f = e.target.files[0];
+            if (!f) return;
+            tplBuffer = await f.arrayBuffer();
+            checkReady();
+        }
+
+        function getSelectedSheets() {
+            const selected = [];
+            $$(".sheet-check:checked").forEach(cb => selected.push(cb.value));
+            return selected;
+        }
+
+        function checkReady() {
+            const selected = getSelectedSheets();
+            const hasFund = selected.includes("基金基础信息");
+            const hasMap = selected.includes("投资映射表");
+            const hasPortfolio = selected.includes("投资组合表");
+            const ok = sourceWorkbook && tplBuffer && hasFund && hasMap && hasPortfolio;
+            $("#btnUpdate").disabled = !ok;
+        }
+
+        $("#btnUpdate").onclick = async () => {
+            errBox.textContent = "";
+            try {
+                const selected = getSelectedSheets();
+                if (!selected.includes("基金基础信息") || !selected.includes("投资映射表") || !selected.includes("投资组合表")) {
+                    errBox.textContent = "⚠️ 必须同时勾选：基金基础信息、投资映射表、投资组合表";
+                    return;
+                }
+
+                let listListed = [];
+                let listFiled = [];
+                let listOther = []; 
+                let listNew = [];
+                let listIpoExit = [];
+                let listMnaExit = [];
+                let listLiquidExit = [];
+                let listPortfolio = [];
+                let portfolioTotal = []; // 单独存放合计行
+                fundInfo = {};
+
+                let hasListListed = false;
+                let hasListFiled = false;
+                let hasListOther = false;
+                let hasListIpoExit = false;
+                let hasListMnaExit = false;
+
+                // 读取基金基础信息
+                const sheetFund = sourceWorkbook.Sheets["基金基础信息"];
+                const jsonFund = XLSX.utils.sheet_to_json(sheetFund, { header: 1 });
+                const headersFund = jsonFund[0] || [];
+                const dataRowFund = jsonFund[2];
+                if (!dataRowFund) {
+                    errBox.textContent = "⚠️ 基金基础信息sheet没有第3行数据！";
+                    return;
+                }
+                const objFund = {};
+                headersFund.forEach((h, idx) => {
+                    if (h) objFund[h.trim()] = dataRowFund[idx] ?? "";
+                })
+                fundInfo = objFund;
+
+                if (fundInfo.totalreturnrate != null && !isNaN(Number(fundInfo.totalreturnrate))) {
+                    const num = Number(fundInfo.totalreturnrate);
+                    fundInfo.totalreturnrate = (num * 100).toFixed(2) + "%";
+                } else {
+                    fundInfo.totalreturnrate = "";
+                }
+
+                if (fundInfo.subpaypercentage != null && !isNaN(Number(fundInfo.subpaypercentage))) {
+                    const num = Number(fundInfo.subpaypercentage);
+                    fundInfo.subpaypercentage = (num * 100).toFixed(2) + "%";
+                } else {
+                    fundInfo.subpaypercentage = "";
+                }
+
+                if (fundInfo.businessdate != null) {
+                    fundInfo.businessdate = fmtDateNoPad(fundInfo.businessdate)
+                }
+
+                if (fundInfo.fundcreatedate != null) {
+                    fundInfo.fundcreatedate_ym = fmtYearMonth(fundInfo.fundcreatedate);
+                    fundInfo.fundcreatedate = excelSerialToDate(fundInfo.fundcreatedate)
+                }
+
+                if (fundInfo.Asofdate != null) {
+                    fundInfo.Asofdate = fmtSlashDate(fundInfo.Asofdate);
+                }
+
+                // 读取投资映射表
+                const sheetMap = sourceWorkbook.Sheets["投资映射表"];
+                const jsonMap = XLSX.utils.sheet_to_json(sheetMap, { header: 1 });
+                const headersMap = jsonMap[0] || [];
+                const rawRows = jsonMap.slice(2);
+                const items = [];
+                for (const r of rawRows) {
+                    const obj = {};
+                    headersMap.forEach((h, idx) => {
+                        if (h) obj[h.trim()] = r[idx] ?? "";
+                    })
+                    if ("Invdate" in obj) obj.Invdate = fmtYearMonth(obj.Invdate);
+                    if ("Shareratio" in obj) obj.Shareratio = fmtPercent(obj.Shareratio);
+                    // 投资映射表 Invcost、Valcost 金额格式化
+                    if ("Invcost" in obj) obj.Invcost = fmtMoney(obj.Invcost);
+                    if ("Valcost" in obj) obj.Valcost = fmtMoney(obj.Valcost);
+                    if (obj.Fund && obj.Fund.trim() !== "") {
+                        items.push(obj);
+                    }
+                }
+                if (items.length === 0) {
+                    errBox.textContent = "⚠️ 投资映射表读取到0条项目数据！";
+                    return;
+                }
+                for (const row of items) {
+                    const typeVal = (row.Type ?? "").trim();
+                    if (typeVal === "已上市项目") {
+                        listListed.push(row);
+                    } else if (typeVal === "已报会项目") {
+                        listFiled.push(row);
+                    } else if (typeVal === "新项目情况") {
+                        listNew.push(row);
+                    } else if (typeVal === "IPO 退出项目") {
+                        listIpoExit.push(row);
+                    } else if (typeVal === "并购、股权转让及回购退出项目") {
+                        listMnaExit.push(row);
+                    } else if (typeVal === "清算退出项目") {
+                        listLiquidExit.push(row);
+                    } else {
+                        listOther.push(row);
+                    }
+                }
+
+                //控制小标题的显示和隐藏
+                hasListListed = listListed.length > 0;
+                hasListFiled = listFiled.length > 0;
+                hasListOther = listOther.length > 0;
+                hasListIpoExit = listIpoExit.length > 0;
+                hasListMnaExit = listMnaExit.length > 0;
+                hasListLiquidExit = listLiquidExit.length > 0;
+
+
+                // 读取投资组合表：区分普通项目 和 合计行
+                const sheetPortfolio = sourceWorkbook.Sheets["投资组合表"];
+                const jsonPortfolio = XLSX.utils.sheet_to_json(sheetPortfolio, { header: 1 });
+                const headersPortfolio = jsonPortfolio[0] || [];
+                const rawPortfolioRows = jsonPortfolio.slice(2);
+                for (const r of rawPortfolioRows) {
+                    const obj = {};
+                    headersPortfolio.forEach((h, idx) => {
+                        if (h) obj[h.trim()] = r[idx] ?? "";
+                    })
+                    if ("Invdate" in obj) obj.Invdate = fmtYearMonth(obj.Invdate);
+                    if ("IRR" in obj) obj.IRR = fmtPercent(obj.IRR);
+                    if ("Shareratio" in obj) obj.Shareratio = fmtPercent(obj.Shareratio);
+                    // 投资组合表4个金额字段格式化
+                    if ("Amtcost" in obj) obj.Amtcost = fmtMoney(obj.Amtcost);
+                    if ("Invcost" in obj) obj.Invcost = fmtMoney(obj.Invcost);
+                    if ("Realizedval" in obj) obj.Realizedval = fmtMoney(obj.Realizedval);
+                    if ("Valcost" in obj) obj.Valcost = fmtMoney(obj.Valcost);
+
+                    // 判断项目名称是【合计】
+                    const pName = (obj.Projectname ?? "").trim();
+                    if (pName === "合计") {
+                        portfolioTotal.push(obj);
+                    } else if (pName !== "") {
+                        listPortfolio.push(obj);
+                    }
+                }
+
+                console.log("投资组合项目 listPortfolio：", listPortfolio);
+                console.log("投资组合合计 portfolioTotal：", portfolioTotal);
+                console.log("已上市项目：", listListed);
+                console.log("已报会项目：", listFiled);
+                console.log("其他在管项目：", listOther);
+                console.log("新项目情况 listNew：", listNew);
+                console.log("IPO退出项目 listIpoExit：", listIpoExit);
+                console.log("并购股权转让退出 listMnaExit：", listMnaExit);
+                console.log("清算退出项目 listLiquidExit：", listLiquidExit);
+                console.log("基金基础信息 fundInfo：", fundInfo);
+
+                const zip = new PizZip(tplBuffer);
+                const doc = new window.docxtemplater(zip, {
+                    paragraphLoop: true,
+                    linebreaks: true,
+                    nullGetter: () => ""
+                });
+                doc.render({
+                    listListed,
+                    listFiled,
+                    listOther,
+                    listNew,
+                    listIpoExit,
+                    listMnaExit,
+                    listLiquidExit,
+                    hasListListed,
+                    hasListFiled,
+                    hasListOther,
+                    hasListIpoExit,
+                    hasListMnaExit,
+                    hasListLiquidExit,
+                    listPortfolio,
+                    portfolioTotal,
+                    ...fundInfo
+                });
+
+
+                let fileName = fundInfo.Filename?.trim() + ".docx";
+                if (!fileName.endsWith(".docx")) fileName += ".docx";
+
+                const outBuf = doc.getZip().generate({ type: "uint8array" });
+                saveFile(outBuf, fileName);
+                alert("✅ 生成完成，文件名：" + fileName);
+            } catch (err) {
+                console.error(err);
+                if (err.properties && Array.isArray(err.properties.errors)) {
+                    let msgList = [];
+                    err.properties.errors.forEach(subErr => {
+                        msgList.push("• " + subErr.name + "：" + subErr.properties.explanation);
+                    })
+                    errBox.textContent = "❌ 多条模板错误：\n" + msgList.join("\n");
+                } else {
+                    errBox.textContent = "❌ 报错：" + err.message;
+                }
+            }
+        }
+
+        function saveFile(buf, name) {
+            const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = name;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        $("#btnReset").onclick = () => {
+            sourceWorkbook = null;
+            tplBuffer = null;
+            sheetList = [];
+            fundInfo = {};
+            $("#fileSource").value = "";
+            $("#fileTpl").value = "";
+            sheetCheckGroup.innerHTML = `<div style="color:#999;padding:4px;">请先上传数据源</div>`;
+            errBox.textContent = "";
+            $("#btnUpdate").disabled = true;
+        }
+    </script>
+</body>
+
+</html>
